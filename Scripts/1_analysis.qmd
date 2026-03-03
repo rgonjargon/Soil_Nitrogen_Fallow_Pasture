@@ -1,0 +1,427 @@
+---
+title: "Fate of soil nitrogen under long-term bare fallow - supplementry"
+author: "Trish Fraser and Tom Moore"
+date: last-modified
+output-file: "Analysis_Report.html"
+format:
+  html:
+    toc: true
+    toc-depth: 5
+    toc-title: "Contents"
+    theme: united
+    highlight-style: tango
+    page-layout: full
+    max-width: 2000px
+    fig-width: 8
+    fig-height: 4
+    code-tools: true
+    code-fold: true
+    code-overflow: scroll
+    df-print: paged
+    embed-resources: true
+    css: css/aicc-tables.css
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| results: false
+
+# CRAN mirror for non-interactive installs
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Install and load packages
+packages <- c(
+  "tidyverse", "readxl", "here", "janitor",
+  "lme4", "MuMIn", "performance",
+  "RColorBrewer", "gridExtra", "colorspace"
+)
+installed <- rownames(installed.packages())
+missing   <- setdiff(packages, installed)
+if (length(missing) > 0) install.packages(missing, dependencies = TRUE)
+for (p in packages) library(p, character.only = TRUE)
+
+options(mc.cores = parallel::detectCores())
+```
+
+# Data summary
+
+::: {.callout-note title="Wrangling & Summary" collapse="true"}
+```{r}
+#| label: wrangle-df
+
+# Total soil C & N: read, clean names, standardise depth labels and factors
+df <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "Total soil C & N")
+orig_names_1 <- names(df)
+df <- df %>% clean_names()
+response_labels_1 <- setNames(orig_names_1, names(df))
+response_labels_1["tn_g_kg_soil"] <- "Total soil N, kg/ha"
+
+df <- df %>%
+  mutate(depth = fct_recode(depth, "0-75" = "0-7.5 cm", "75-150" = "7.5-15 cm", "150-250" = "15-25 cm"))
+cols <- c("trial", "year", "plot", "treatment", "rep", "depth")
+df[, cols] <- lapply(df[, cols], as.factor)
+if ("treat_ment" %in% names(df) && !"treatment" %in% names(df)) {
+  df <- df %>% mutate(treatment = treat_ment) %>% dplyr::select(-treat_ment)
+}
+df %>% group_by(year, treatment, depth) %>% tally()
+```
+
+```{r}
+#| label: wrangle-df2
+
+# POM C & N: read (skip header), clean names, depth labels, factors; ensure "months" for modelling
+df.2 <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "POM C & N", skip = 1)
+orig_names_2 <- names(df.2)
+df.2 <- df.2 %>% clean_names()
+response_labels_2 <- setNames(orig_names_2, names(df.2))
+df.2 <- df.2 %>% mutate(depth = fct_recode(depth, "0-75" = "0 - 7.5", "75-150" = "7.5 - 15", "150-250" = "15 - 25"))
+cols <- c("plot", "depth", "treatment", "rep")
+df.2[, cols] <- lapply(df.2[, cols], as.factor)
+if (!"months" %in% names(df.2) && "date" %in% names(df.2)) {
+  d <- tryCatch(as.Date(df.2$date), error = function(e) NULL)
+  if (is.null(d) || all(is.na(d))) d <- as.numeric(df.2$date)
+  df.2$months <- as.numeric(difftime(d, min(d, na.rm = TRUE), units = "days")) / (365.25 / 12)
+}
+df.2 %>% group_by(date, treatment, depth) %>% tally()
+```
+
+```{r}
+#| label: wrangle-df4
+
+# Microbial biomass C & N: read, clean names, depth labels, factors
+df.4 <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "MB C & N")
+orig_names_4 <- names(df.4)
+df.4 <- df.4 %>% clean_names()
+response_labels_4 <- setNames(orig_names_4, names(df.4))
+df.4 <- df.4 %>% mutate(depth = fct_recode(depth, "0-75" = "0 - 7.5", "75-150" = "7.5 - 15", "150-250" = "15 - 25"))
+cols <- c("plot", "depth", "treatment", "rep")
+df.4[, cols] <- lapply(df.4[, cols], as.factor)
+df.4 %>% group_by(date, treatment, depth) %>% tally()
+```
+
+```{r}
+#| label: wrangle-df3
+
+# Total cations & pH: read (skip 2 rows), clean names, depth labels, factors
+df.3 <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "Total cations & pH", skip = 2)
+orig_names_3 <- names(df.3)
+df.3 <- df.3 %>% clean_names()
+response_labels_3 <- setNames(orig_names_3, names(df.3))
+df.3 <- df.3 %>% mutate(depth = fct_recode(depth, "0-75" = "0 - 7.5", "75-150" = "7.5 - 15", "150-250" = "15 - 25"))
+cols <- c("plot", "depth", "treatment", "replicate")
+df.3[, cols] <- lapply(df.3[, cols], as.factor)
+df.3 %>% group_by(year, treatment, depth) %>% tally()
+```
+:::
+
+```{r}
+#| label: functions
+#| results: false
+
+source(here::here("Scripts", "r", "functions.R"))
+```
+## Analyses
+### Total soil C, N and bulk density
+
+```{r}
+#| label: analysis-1-fit
+#| results: false
+
+analysis_1 <- fit_models(
+  df,
+  response_vars = c("tn_g_kg_soil", "tc_g_kg_soil", "c_n_ratio", "bd_g_cm3", "c_stock_t_ha", "c_stock_to_25_cm_t_ha"),
+  time = "months",
+  treatment = "treatment",
+  depth = "depth"
+)
+```
+
+**Plots**
+
+```{r}
+#| label: analysis-1-plots
+#| fig-width: 10
+#| fig-height: 15
+#| out-width: 25%
+
+plot_model_fits(
+  model_fits      = analysis_1,
+  time            = "months",
+  treatment       = "treatment",
+  depth           = "depth",
+  depth_order     = c("0-75", "75-150", "150-250"),
+  raw_data        = df,
+  response_labels = response_labels_1,
+  ncol            = 2,
+  save_dir        = here::here("Plots"),
+  save_dpi        = 600,
+  save_width      = 5,
+  save_height     = 5
+)
+```
+
+**AICc table**
+
+::: {.aicc-table}
+```{r}
+#| label: analysis-1-aicc
+
+knitr::kable(analysis_1$aicc_table)
+```
+:::
+
+::: {.callout-note title="Model checks (click to show/hide)" collapse="true"}
+```{r}
+#| label: analysis-1-checks
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: 100%
+
+check_model_performance(analysis_1)
+```
+:::
+
+::: {.callout-note title="Best model summaries (click to show/hide)" collapse="true"}
+::: {.model-summary}
+```{r}
+#| label: analysis-1-summaries
+#| class-output: model-summary
+
+best_model_summaries(analysis_1)
+```
+:::
+:::
+
+### Particulate organic matter (POM) C and N
+
+```{r}
+#| label: analysis-2-fit
+#| results: false
+
+analysis_2 <- fit_models(
+  df.2,
+  response_vars = c("soil_mass_0_25_cm_t_ha", "total_pom_c_mg_ha", "total_pom_n_kg_ha"),
+  time = "months",
+  treatment = "treatment",
+  depth = "depth"
+)
+```
+
+**Plots**
+
+```{r}
+#| label: analysis-2-plots
+#| fig-width: 10
+#| fig-height: 10
+#| out-width: 25%
+
+plot_model_fits(
+  model_fits      = analysis_2,
+  time            = "months",
+  treatment       = "treatment",
+  depth           = "depth",
+  depth_order     = c("0-75", "75-150", "150-250"),
+  raw_data        = df.2,
+  response_labels = response_labels_2,
+  ncol            = 2,
+  save_dir        = here::here("Plots"),
+  save_dpi        = 600,
+  save_width      = 5,
+  save_height     = 5
+)
+```
+
+**AICc table**
+
+::: {.aicc-table}
+```{r}
+#| label: analysis-2-aicc
+
+knitr::kable(analysis_2$aicc_table)
+```
+:::
+
+::: {.callout-note title="Model checks (click to show/hide)" collapse="true"}
+```{r}
+#| label: analysis-2-checks
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: 100%
+
+check_model_performance(analysis_2)
+```
+:::
+
+::: {.callout-note title="Best model summaries (click to show/hide)" collapse="true"}
+::: {.model-summary}
+```{r}
+#| label: analysis-2-summaries
+#| class-output: model-summary
+
+best_model_summaries(analysis_2)
+```
+:::
+:::
+
+### Microbial biomass C and N
+
+```{r}
+#| label: analysis-3-fit
+#| results: false
+
+analysis_3 <- fit_models(
+  df.4,
+  response_vars = c("mbc_mg_kg", "mbn_mg_kg", "mbc_kg_ha", "mbc_0_25_cm_kg_ha", "mbn_kg_ha", "mbn_0_25_cm_kg_ha"),
+  time = "months",
+  treatment = "treatment",
+  depth = "depth"
+)
+```
+
+**Plots**
+
+```{r}
+#| label: analysis-3-plots
+#| fig-width: 10
+#| fig-height: 15
+#| out-width: 25%
+
+plot_model_fits(
+  model_fits      = analysis_3,
+  time            = "months",
+  treatment       = "treatment",
+  depth           = "depth",
+  depth_order     = c("0-75", "75-150", "150-250"),
+  raw_data        = df.4,
+  response_labels = response_labels_4,
+  ncol            = 2,
+  save_dir        = here::here("Plots"),
+  save_dpi        = 600,
+  save_width      = 5,
+  save_height     = 5
+)
+```
+
+**AICc table**
+
+::: {.aicc-table}
+```{r}
+#| label: analysis-3-aicc
+
+knitr::kable(analysis_3$aicc_table)
+```
+:::
+
+::: {.callout-note title="Model checks (click to show/hide)" collapse="true"}
+```{r}
+#| label: analysis-3-checks
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: 100%
+
+check_model_performance(analysis_3)
+```
+:::
+
+::: {.callout-note title="Best model summaries (click to show/hide)" collapse="true"}
+::: {.model-summary}
+```{r}
+#| label: analysis-3-summaries
+#| class-output: model-summary
+
+best_model_summaries(analysis_3)
+```
+:::
+:::
+
+### Soil pH and cations
+
+```{r}
+#| label: analysis-4-fit
+#| results: false
+
+analysis_4 <- fit_models(
+  df.3,
+  response_vars = c("p_h", "cations_0_25_cm_keq_ha", "ca_0_25_cm_keq_ha"),
+  time = "months",
+  treatment = "treatment",
+  depth = "depth"
+)
+```
+
+**Plots**
+
+```{r}
+#| label: analysis-4-plots
+#| fig-width: 10
+#| fig-height: 10
+#| out-width: 25%
+
+plot_model_fits(
+  model_fits      = analysis_4,
+  time            = "months",
+  treatment       = "treatment",
+  depth           = "depth",
+  depth_order     = c("0-75", "75-150", "150-250"),
+  raw_data        = df.3,
+  response_labels = response_labels_3,
+  ncol            = 2,
+  save_dir        = here::here("Plots"),
+  save_dpi        = 600,
+  save_width      = 5,
+  save_height     = 5
+)
+```
+
+**AICc table**
+
+::: {.aicc-table}
+```{r}
+#| label: analysis-4-aicc
+
+knitr::kable(analysis_4$aicc_table)
+```
+:::
+
+::: {.callout-note title="Model checks (click to show/hide)" collapse="true"}
+```{r}
+#| label: analysis-4-checks
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: 100%
+
+check_model_performance(analysis_4)
+```
+:::
+
+::: {.callout-note title="Best model summaries (click to show/hide)" collapse="true"}
+::: {.model-summary}
+```{r}
+#| label: analysis-4-summaries
+#| class-output: model-summary
+
+best_model_summaries(analysis_4)
+```
+:::
+:::
+
+# References
+
+R Core Team (2022). R: A language and environment for statistical computing. R Foundation for Statistical Computing, Vienna, Austria.
+
+::: {.callout-note title="Session Information" collapse="true"}
+```{r}
+#| label: session-info
+#| echo: false
+
+utils::sessionInfo()
+```
+:::

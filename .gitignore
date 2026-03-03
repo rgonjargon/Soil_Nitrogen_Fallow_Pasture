@@ -1,0 +1,33 @@
+# Data directory
+Data/
+
+# R / RStudio
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj.user
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Quarto / knitr
+.quarto/
+_freeze/
+*.html
+*.log
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+.cache/

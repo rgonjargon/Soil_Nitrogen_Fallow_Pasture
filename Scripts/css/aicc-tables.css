@@ -1,0 +1,82 @@
+/* Figures: full width of page */
+.quarto-figure,
+.cell-output-display .quarto-figure {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+.quarto-figure figure,
+.cell-output-display figure {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+.quarto-figure img,
+.cell-output-display img {
+  width: 100% !important;
+  height: auto !important;
+  max-width: 100% !important;
+}
+
+/* AICc tables: smaller font, fit columns to text, horizontal scroll to see all columns */
+.aicc-table {
+  font-size: 0.75rem;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+
+/* Column width = text width; table only as wide as content */
+.aicc-table table,
+.aicc-table .data-frame table {
+  font-size: inherit;
+  width: max-content;
+  table-layout: auto;
+}
+
+/* Column width fits text; horizontal scroll on .aicc-table shows full table */
+.aicc-table th,
+.aicc-table td {
+  white-space: nowrap;
+  padding: 0.25em 0.4em;
+}
+
+/* Best model summaries: smaller text, no wrap, horizontal scroll */
+.model-summary {
+  font-size: 0.65rem !important;
+  overflow-x: auto !important;
+  max-width: 100%;
+}
+.model-summary .cell-output,
+.model-summary .cell-output-stdout {
+  font-size: inherit !important;
+  overflow-x: auto !important;
+  min-width: 0; /* allow shrink for scroll */
+}
+.model-summary pre,
+.model-summary code,
+.model-summary table,
+.model-summary .cell-output pre,
+.model-summary .cell-output table,
+.model-summary .cell-output-stdout pre {
+  font-size: inherit !important;
+}
+/* Keep pre from wrapping: preserve layout, let container scroll */
+.model-summary pre,
+.model-summary .cell-output pre,
+.model-summary .cell-output-stdout pre {
+  white-space: pre !important;
+  word-wrap: normal !important;
+  overflow-x: visible !important;
+  min-width: max-content !important;
+  max-width: none !important;
+}
+.model-summary table,
+.model-summary th,
+.model-summary td,
+.model-summary .cell-output table,
+.model-summary .cell-output th,
+.model-summary .cell-output td {
+  white-space: nowrap !important;
+  padding: 0.2em 0.35em;
+}
+.model-summary .cell-output table {
+  width: max-content !important;
+}
