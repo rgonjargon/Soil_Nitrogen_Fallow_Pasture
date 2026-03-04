@@ -227,9 +227,15 @@ check_model_performance <- function(model_fits) {
     cat(strrep("=", 60), "\n")
 
     tryCatch({
-      cm <- performance::check_model(m)
+      # panel = TRUE gives one combined figure (posterior predictive, linearity, homogeneity, collinearity, normality)
+      cm <- performance::check_model(m, panel = TRUE)
       p  <- plot(cm)
-      print(p)  # force plot output to be captured in knitr/Quarto
+      if (inherits(p, "list")) {
+        gridExtra::grid.arrange(grobs = p, ncol = 1)
+      } else {
+        print(p)
+      }
+      invisible(NULL)  # prevent knitr from auto-printing the same figure again
     }, error = function(e) {
       if (grepl("contrasts can be applied only to factors", conditionMessage(e)))
         message("  Skipped — factor has < 2 levels")
@@ -372,6 +378,24 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
     y_label   <- if (!is.null(response_labels) && resp %in% names(response_labels)) response_labels[[resp]] else gsub("_", " ", resp)
     y_label   <- gsub(",", "", y_label)  # remove commas from variable names
     col_label <- if (multi_depth) paste(gsub("_"," ",treatment), "\u00d7", gsub("_"," ",depth)) else if (!is.null(treatment)) gsub("_"," ",treatment) else NULL
+    if (!is.null(col_label)) col_label <- tools::toTitleCase(col_label)
+
+    # Month axis: breaks every 12 months
+    x_range      <- range(raw_data[[time]], na.rm = TRUE)
+    month_breaks <- seq(floor(x_range[1] / 12) * 12, ceiling(x_range[2] / 12) * 12, by = 12)
+
+    # Formula form for subtitle and equation LHS: y, sqrt(y), or y²
+    model_form <- switch(best_nm,
+      "linear"       = "y",
+      "square root"  = "sqrt(y)",
+      "quadratic"    = "y\u00b2",
+      "y")
+    eq_lhs    <- switch(best_nm,
+      "linear"       = "y = ",
+      "square root"  = "sqrt(y) = ",
+      "quadratic"    = "y\u00b2 = ",
+      "y = ")
+    model_name <- tools::toTitleCase(best_nm)
 
     # Subtitle: equations in order Fallow (depths low→high), then Pasture (depths low→high)
     trt_order <- c(intersect(c("Fallow", "Pasture"), treat_levels), setdiff(treat_levels, c("Fallow", "Pasture")))
@@ -390,14 +414,13 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
         intercept_str <- format(round(intercept, 3), trim = TRUE)
         pm <- if (slope >= 0) " + " else " \u2212 "
         slope_str <- if (slope >= 0) slope_str else format(round(-slope, 3), trim = TRUE)
-        eq_lines <- c(eq_lines, paste0(grp, ": y = ", intercept_str, pm, slope_str, "\u00b7Months"))
+        eq_lines <- c(eq_lines, paste0(grp, ": ", eq_lhs, intercept_str, pm, slope_str, "\u00b7", sub("months", "Months", time, ignore.case = TRUE)))
       }
     }
-    # Subtitle: Best model, then R², then formulas (no caption)
-    r2_val   <- aicc_sub$R2[1]
-    r2_line  <- paste0("R\u00b2 = ", r2_val)
-    best_line <- paste0(if (!is.null(force_model)) "Forced model: " else "Best model: ",
-                        tools::toTitleCase(best_nm))
+    # Subtitle: Best model name (Linear / Square Root / Quadratic) and formula form, then R², then formulas
+    r2_val    <- aicc_sub$R2[1]
+    r2_line   <- paste0("R\u00b2 = ", r2_val)
+    best_line <- paste0(if (!is.null(force_model)) "Forced model: " else "Best model: ", model_name)
     subtitle_text <- paste(c(best_line, r2_line, eq_lines), collapse = "\n")
 
     p <- ggplot() +
@@ -455,6 +478,8 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
         }
       } +
       scale_fill_manual(values = pal, drop = FALSE, guide = "none") +
+      scale_x_continuous(breaks = month_breaks, expand = expansion(mult = c(0.02, 0.06))) +
+      scale_y_continuous(expand = expansion(mult = 0.12)) +
       { if (multi_depth) scale_linetype_manual(values = depth_linetypes, guide = "none") } +
       { if (multi_depth) scale_shape_discrete(guide = "none") } +
       labs(
@@ -511,6 +536,7 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
   }
 
   # Each plot keeps its own legend (no shared legend)
+  if (length(plots) == 0L) return(invisible(plots))
   nrow_ <- ceiling(length(plots) / ncol)
   gridExtra::grid.arrange(grobs = plots, ncol = ncol, nrow = nrow_, widths = rep(1, ncol))
 

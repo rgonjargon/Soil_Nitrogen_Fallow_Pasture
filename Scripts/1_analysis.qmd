@@ -58,7 +58,8 @@ df <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "To
 orig_names_1 <- names(df)
 df <- df %>% clean_names()
 response_labels_1 <- setNames(orig_names_1, names(df))
-response_labels_1["tn_g_kg_soil"] <- "Total soil N, kg/ha"
+response_labels_1["tc_g_kg_soil"] <- "Total soil C (kg/ha)"
+response_labels_1["tn_g_kg_soil"] <- "Total soil N (kg/ha)"
 
 df <- df %>%
   mutate(depth = fct_recode(depth, "0-75" = "0-7.5 cm", "75-150" = "7.5-15 cm", "150-250" = "15-25 cm"))
@@ -97,6 +98,12 @@ df.4 <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "
 orig_names_4 <- names(df.4)
 df.4 <- df.4 %>% clean_names()
 response_labels_4 <- setNames(orig_names_4, names(df.4))
+response_labels_4["mbc_mg_kg"]         <- "Microbial biomass C (kg/ha)"
+response_labels_4["mbn_mg_kg"]         <- "Microbial biomass N (kg/ha)"
+response_labels_4["mbc_kg_ha"]         <- "Microbial biomass C (kg/ha)"
+response_labels_4["mbc_0_25_cm_kg_ha"] <- "Microbial biomass C (kg/ha) (0-25 cm)"
+response_labels_4["mbn_kg_ha"]         <- "Microbial biomass N (kg/ha)"
+response_labels_4["mbn_0_25_cm_kg_ha"] <- "Microbial biomass N (kg/ha) (0-25 cm)"
 df.4 <- df.4 %>% mutate(depth = fct_recode(depth, "0-75" = "0 - 7.5", "75-150" = "7.5 - 15", "150-250" = "15 - 25"))
 cols <- c("plot", "depth", "treatment", "rep")
 df.4[, cols] <- lapply(df.4[, cols], as.factor)
@@ -111,10 +118,58 @@ df.3 <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "
 orig_names_3 <- names(df.3)
 df.3 <- df.3 %>% clean_names()
 response_labels_3 <- setNames(orig_names_3, names(df.3))
+response_labels_3["p_h"]                    <- "pH"
+response_labels_3["cations_0_25_cm_keq_ha"] <- "Total cations remaining (keq/ha)"
+response_labels_3["ca_0_25_cm_keq_ha"]     <- "Cations remaining (keq/ha)"
 df.3 <- df.3 %>% mutate(depth = fct_recode(depth, "0-75" = "0 - 7.5", "75-150" = "7.5 - 15", "150-250" = "15 - 25"))
 cols <- c("plot", "depth", "treatment", "replicate")
 df.3[, cols] <- lapply(df.3[, cols], as.factor)
 df.3 %>% group_by(year, treatment, depth) %>% tally()
+```
+
+```{r}
+#| label: wrangle-df5
+
+# N Leached: read range AK8:AT20 (10 cols: year, N leached × 2, cum N leached × 2, drainage × 2, cum drainage × 2, winter rainfall)
+df.5 <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "N Leached", range = "AK8:AT20")
+names(df.5) <- c(
+  "year", "fallow_n_leached", "pasture_n_leached",
+  "cummulative_n_leached_fallow", "cummulative_n_leached_pasture",
+  "drainage_fallow", "drainage_pasture",
+  "Cummulative_drainage_fallow", "Cummulative_drainage_pasture",
+  "winter_rainfall"
+)
+
+# Pivot to long: one row per year × treatment (Fallow/Pasture)
+df.5 <- df.5 %>%
+  pivot_longer(
+    cols = -c(year, winter_rainfall),
+    names_to = "measure",
+    values_to = "value"
+  ) %>%
+  mutate(
+    treatment = if_else(grepl("^fallow_|_fallow$", measure), "Fallow", "Pasture"),
+    measure = case_when(
+      measure %in% c("fallow_n_leached", "pasture_n_leached") ~ "n_leached_",
+      measure %in% c("cummulative_n_leached_fallow", "cummulative_n_leached_pasture") ~ "n_leached_cummulative",
+      measure %in% c("drainage_fallow", "drainage_pasture") ~ "drainage",
+      measure %in% c("Cummulative_drainage_fallow", "Cummulative_drainage_pasture") ~ "cummulative_drainage",
+      .default = measure
+    )
+  ) %>%
+  pivot_wider(names_from = measure, values_from = value)
+
+# Factor treatment, drop rows with any NA
+df.5 <- df.5 %>%
+  mutate(treatment = factor(treatment, levels = c("Fallow", "Pasture"))) %>%
+  na.omit()
+
+# Labels for plotting (used if this table is combined with other analyses)
+response_labels_5 <- c(
+  n_leached_cummulative = "Cumulative N leached (kg N/ha)",
+  cummulative_drainage  = "Cumulative drainage (mm)"
+)
+df.5
 ```
 :::
 
@@ -409,6 +464,117 @@ check_model_performance(analysis_4)
 #| class-output: model-summary
 
 best_model_summaries(analysis_4)
+```
+:::
+:::
+
+### N Leached
+
+Linear regression: cumulative N leached ~ cumulative drainage × treatment (`lm`).
+
+```{r}
+#| label: analysis-5-fit
+#| results: false
+
+# Linear model: cumulative N leached ~ cumulative drainage × treatment (separate slope per treatment)
+model_n_leached <- lm(n_leached_cummulative ~ cummulative_drainage * treatment, data = df.5)
+```
+
+**Plots**
+
+```{r}
+#| label: analysis-5-plots
+#| fig-width: 5
+#| fig-height: 5
+#| out-width: 50%
+#| layout-ncol: 2
+
+# Prediction grid: drainage × treatment for fitted lines and 95% CI
+pred_n_leached <- expand_grid(
+  cummulative_drainage = seq(
+    min(df.5$cummulative_drainage, na.rm = TRUE),
+    max(df.5$cummulative_drainage, na.rm = TRUE),
+    length.out = 100
+  ),
+  treatment = factor(c("Fallow", "Pasture"), levels = c("Fallow", "Pasture"))
+)
+pred_n_leached$fit <- predict(model_n_leached, newdata = pred_n_leached, se.fit = TRUE)$fit
+pred_n_leached$se  <- predict(model_n_leached, newdata = pred_n_leached, se.fit = TRUE)$se.fit
+pred_n_leached     <- pred_n_leached %>% filter(complete.cases(fit, se))
+
+# Subtitle: Best model, R², and equations (match style of other analysis plots)
+co         <- coef(model_n_leached)
+r2         <- format(round(summary(model_n_leached)$r.squared, 3), trim = TRUE)
+int_fallow <- co["(Intercept)"]
+slope_fallow <- co["cummulative_drainage"]
+int_pasture  <- co["(Intercept)"] + if (is.na(co["treatmentPasture"])) 0 else co["treatmentPasture"]
+slope_pasture <- co["cummulative_drainage"] +
+  if (is.na(co["cummulative_drainage:treatmentPasture"])) 0 else co["cummulative_drainage:treatmentPasture"]
+eq_fallow  <- paste0(
+  "Fallow: y = ", format(round(int_fallow, 3), trim = TRUE),
+  if (slope_fallow >= 0) " + " else " \u2212 ",
+  format(round(abs(slope_fallow), 3), trim = TRUE), "\u00b7Cum drainage (mm)"
+)
+eq_pasture <- paste0(
+  "Pasture: y = ", format(round(int_pasture, 3), trim = TRUE),
+  if (slope_pasture >= 0) " + " else " \u2212 ",
+  format(round(abs(slope_pasture), 3), trim = TRUE), "\u00b7Cum drainage (mm)"
+)
+subtitle_n_leached <- paste("Best model: Linear", paste0("R\u00b2 = ", r2), eq_fallow, eq_pasture, sep = "\n")
+
+# Plot: points, fitted lines, and 95% CI ribbon by treatment
+p_n_leached <- ggplot(df.5, aes(x = cummulative_drainage, y = n_leached_cummulative, colour = treatment)) +
+  geom_ribbon(
+    data = pred_n_leached,
+    aes(x = cummulative_drainage, ymin = fit - 1.96 * se, ymax = fit + 1.96 * se, fill = treatment),
+    alpha = 0.15, colour = NA, inherit.aes = FALSE
+  ) +
+  geom_line(
+    data = pred_n_leached,
+    aes(x = cummulative_drainage, y = fit, colour = treatment),
+    linewidth = 1.2, inherit.aes = FALSE
+  ) +
+  geom_point(alpha = 0.8, size = 2.5) +
+  scale_colour_manual(values = c(Fallow = "#8B4513", Pasture = "#228B22"), name = "Treatment") +
+  scale_fill_manual(values = c(Fallow = "#8B4513", Pasture = "#228B22"), guide = "none") +
+  scale_x_continuous(expand = expansion(mult = c(0.02, 0.06))) +
+  scale_y_continuous(expand = expansion(mult = 0.12)) +
+  labs(
+    x = "Cumulative drainage (mm)",
+    y = "Cumulative N leached (kg N/ha)",
+    subtitle = subtitle_n_leached
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    aspect.ratio = 0.5,
+    legend.position = "bottom",
+    plot.subtitle = element_text(size = 8, colour = "grey40", hjust = 0, lineheight = 1.1, margin = margin(b = 10))
+  )
+print(p_n_leached)
+ggsave(here::here("Plots", "n_leached_vs_drainage.png"), plot = p_n_leached, width = 5, height = 5, dpi = 600)
+```
+
+::: {.callout-note title="Model checks (click to show/hide)" collapse="true"}
+```{r}
+#| label: analysis-5-checks
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: 100%
+
+# Diagnostic plots for lm (normality, linearity, homogeneity, etc.)
+print(plot(performance::check_model(model_n_leached, panel = TRUE)))
+```
+:::
+
+::: {.callout-note title="Model summary and statistical significance" collapse="true"}
+::: {.model-summary}
+```{r}
+#| label: analysis-5-summaries
+#| class-output: model-summary
+
+# Coefficients, SE, t, p-value, R²
+summary(model_n_leached)
 ```
 :::
 :::
