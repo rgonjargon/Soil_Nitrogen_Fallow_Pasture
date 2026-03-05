@@ -35,7 +35,7 @@ options(repos = c(CRAN = "https://cloud.r-project.org"))
 
 # Install and load packages
 packages <- c(
-  "tidyverse", "readxl", "here", "janitor",
+  "tidyverse", "readxl", "writexl", "here", "janitor",
   "lme4", "MuMIn", "performance",
   "RColorBrewer", "gridExtra", "colorspace"
 )
@@ -101,9 +101,9 @@ response_labels_4 <- setNames(orig_names_4, names(df.4))
 response_labels_4["mbc_mg_kg"]         <- "Microbial biomass C (kg/ha)"
 response_labels_4["mbn_mg_kg"]         <- "Microbial biomass N (kg/ha)"
 response_labels_4["mbc_kg_ha"]         <- "Microbial biomass C (kg/ha)"
-response_labels_4["mbc_0_25_cm_kg_ha"] <- "Microbial biomass C (kg/ha) (0-25 cm)"
+response_labels_4["mbc_0_25_cm_kg_ha"] <- "Microbial biomass C (kg/ha)"
 response_labels_4["mbn_kg_ha"]         <- "Microbial biomass N (kg/ha)"
-response_labels_4["mbn_0_25_cm_kg_ha"] <- "Microbial biomass N (kg/ha) (0-25 cm)"
+response_labels_4["mbn_0_25_cm_kg_ha"] <- "Microbial biomass N (kg/ha)"
 df.4 <- df.4 %>% mutate(depth = fct_recode(depth, "0-75" = "0 - 7.5", "75-150" = "7.5 - 15", "150-250" = "15 - 25"))
 cols <- c("plot", "depth", "treatment", "rep")
 df.4[, cols] <- lapply(df.4[, cols], as.factor)
@@ -179,6 +179,19 @@ df.5
 
 source(here::here("Scripts", "r", "functions.R"))
 ```
+
+```{r}
+#| label: plots-output-config
+#| results: false
+
+# Output directories at project root (next to each other): Plots and Tables
+plots_dir         <- here::here("Plots")
+tables_dir        <- here::here("Tables")
+save_width_plots  <- 5
+save_height_plots <- 3
+save_dpi_plots    <- 600
+```
+
 ## Analyses
 ### Total soil C, N and bulk density
 
@@ -188,7 +201,8 @@ source(here::here("Scripts", "r", "functions.R"))
 
 analysis_1 <- fit_models(
   df,
-  response_vars = c("tn_g_kg_soil", "tc_g_kg_soil", "c_n_ratio", "bd_g_cm3", "c_stock_t_ha", "c_stock_to_25_cm_t_ha"),
+  response_vars = c("tn_g_kg_soil", "tc_g_kg_soil", "c_n_ratio", "bd_g_cm3", "c_stock_t_ha", 
+  "n_stock_to_25_cm_kg_ha","c_stock_to_25_cm_t_ha"),
   time = "months",
   treatment = "treatment",
   depth = "depth"
@@ -200,7 +214,7 @@ analysis_1 <- fit_models(
 ```{r}
 #| label: analysis-1-plots
 #| fig-width: 10
-#| fig-height: 15
+#| fig-height: 20
 #| out-width: 25%
 
 plot_model_fits(
@@ -212,10 +226,37 @@ plot_model_fits(
   raw_data        = df,
   response_labels = response_labels_1,
   ncol            = 2,
-  save_dir        = here::here("Plots"),
-  save_dpi        = 600,
-  save_width      = 5,
-  save_height     = 5
+  save_dir        = plots_dir,
+  save_dpi        = save_dpi_plots,
+  save_width      = save_width_plots,
+  save_height     = save_height_plots
+)
+```
+
+**Total soil N (kg/ha) — Fallow only**
+
+```{r}
+#| label: analysis-1-plot-tn-fallow
+#| fig-width: 10
+#| fig-height: 5
+#| out-width: 25%
+
+plot_model_fits(
+  model_fits        = analysis_1,
+  time              = "months",
+  treatment         = "treatment",
+  depth             = "depth",
+  depth_order       = c("0-75", "75-150", "150-250"),
+  raw_data          = df,
+  response_labels   = response_labels_1,
+  response_filter   = "tn_g_kg_soil",
+  treatment_filter  = "Fallow",
+  ncol              = 2,
+  save_dir          = plots_dir,
+  save_prefix       = "tn_fallow",
+  save_dpi          = save_dpi_plots,
+  save_width        = save_width_plots,
+  save_height       = save_height_plots
 )
 ```
 
@@ -284,10 +325,10 @@ plot_model_fits(
   raw_data        = df.2,
   response_labels = response_labels_2,
   ncol            = 2,
-  save_dir        = here::here("Plots"),
-  save_dpi        = 600,
-  save_width      = 5,
-  save_height     = 5
+  save_dir        = plots_dir,
+  save_dpi        = save_dpi_plots,
+  save_width      = save_width_plots,
+  save_height     = save_height_plots
 )
 ```
 
@@ -356,10 +397,10 @@ plot_model_fits(
   raw_data        = df.4,
   response_labels = response_labels_4,
   ncol            = 2,
-  save_dir        = here::here("Plots"),
-  save_dpi        = 600,
-  save_width      = 5,
-  save_height     = 5
+  save_dir        = plots_dir,
+  save_dpi        = save_dpi_plots,
+  save_width      = save_width_plots,
+  save_height     = save_height_plots
 )
 ```
 
@@ -428,10 +469,10 @@ plot_model_fits(
   raw_data        = df.3,
   response_labels = response_labels_3,
   ncol            = 2,
-  save_dir        = here::here("Plots"),
-  save_dpi        = 600,
-  save_width      = 5,
-  save_height     = 5
+  save_dir        = plots_dir,
+  save_dpi        = save_dpi_plots,
+  save_width      = save_width_plots,
+  save_height     = save_height_plots
 )
 ```
 
@@ -444,6 +485,24 @@ plot_model_fits(
 knitr::kable(analysis_4$aicc_table)
 ```
 :::
+
+**Export AICc tables to Excel**
+
+```{r}
+#| label: export-aicc-tables
+#| echo: false
+
+dir.create(tables_dir, recursive = TRUE, showWarnings = FALSE)
+writexl::write_xlsx(
+  list(
+    Analysis_1_Total_soil_C_N   = analysis_1$aicc_table,
+    Analysis_2_POM_C_N          = analysis_2$aicc_table,
+    Analysis_3_Microbial_biomass = analysis_3$aicc_table,
+    Analysis_4_pH_cations       = analysis_4$aicc_table
+  ),
+  file.path(tables_dir, "aicc_tables.xlsx")
+)
+```
 
 ::: {.callout-note title="Model checks (click to show/hide)" collapse="true"}
 ```{r}
@@ -504,21 +563,21 @@ pred_n_leached     <- pred_n_leached %>% filter(complete.cases(fit, se))
 
 # Subtitle: Best model, R², and equations (match style of other analysis plots)
 co         <- coef(model_n_leached)
-r2         <- format(round(summary(model_n_leached)$r.squared, 3), trim = TRUE)
+r2         <- format(round(summary(model_n_leached)$r.squared, 2), trim = TRUE)
 int_fallow <- co["(Intercept)"]
 slope_fallow <- co["cummulative_drainage"]
 int_pasture  <- co["(Intercept)"] + if (is.na(co["treatmentPasture"])) 0 else co["treatmentPasture"]
 slope_pasture <- co["cummulative_drainage"] +
   if (is.na(co["cummulative_drainage:treatmentPasture"])) 0 else co["cummulative_drainage:treatmentPasture"]
 eq_fallow  <- paste0(
-  "Fallow: y = ", format(round(int_fallow, 3), trim = TRUE),
+  "Fallow: y = ", format(round(int_fallow, 2), trim = TRUE),
   if (slope_fallow >= 0) " + " else " \u2212 ",
-  format(round(abs(slope_fallow), 3), trim = TRUE), "\u00b7Cum drainage (mm)"
+  format(round(abs(slope_fallow), 2), trim = TRUE), "\u00b7Cumulative drainage (mm)"
 )
 eq_pasture <- paste0(
-  "Pasture: y = ", format(round(int_pasture, 3), trim = TRUE),
+  "Pasture: y = ", format(round(int_pasture, 2), trim = TRUE),
   if (slope_pasture >= 0) " + " else " \u2212 ",
-  format(round(abs(slope_pasture), 3), trim = TRUE), "\u00b7Cum drainage (mm)"
+  format(round(abs(slope_pasture), 2), trim = TRUE), "\u00b7Cumulative drainage (mm)"
 )
 subtitle_n_leached <- paste("Best model: Linear", paste0("R\u00b2 = ", r2), eq_fallow, eq_pasture, sep = "\n")
 
@@ -537,7 +596,7 @@ p_n_leached <- ggplot(df.5, aes(x = cummulative_drainage, y = n_leached_cummulat
   geom_point(alpha = 0.8, size = 2.5) +
   scale_colour_manual(values = c(Fallow = "#8B4513", Pasture = "#228B22"), name = "Treatment") +
   scale_fill_manual(values = c(Fallow = "#8B4513", Pasture = "#228B22"), guide = "none") +
-  scale_x_continuous(expand = expansion(mult = c(0.02, 0.06))) +
+  scale_x_continuous(expand = expansion(mult = c(0.02, 0.32))) +
   scale_y_continuous(expand = expansion(mult = 0.12)) +
   labs(
     x = "Cumulative drainage (mm)",
@@ -547,11 +606,16 @@ p_n_leached <- ggplot(df.5, aes(x = cummulative_drainage, y = n_leached_cummulat
   theme_classic(base_size = 11) +
   theme(
     aspect.ratio = 0.5,
-    legend.position = "bottom",
+    legend.position = c(1, 0.5),
+    legend.justification = c(1, 0.5),
+    legend.box = "vertical",
+    legend.box.background = element_rect(fill = "white", colour = "grey85", linewidth = 0.5),
+    legend.margin = margin(6, 8, 6, 8),
     plot.subtitle = element_text(size = 8, colour = "grey40", hjust = 0, lineheight = 1.1, margin = margin(b = 10))
   )
 print(p_n_leached)
-ggsave(here::here("Plots", "n_leached_vs_drainage.png"), plot = p_n_leached, width = 5, height = 5, dpi = 600)
+# Same workflow as other plots: save to plots_dir with shared dimensions
+ggsave(file.path(plots_dir, "n_leached_vs_drainage.png"), plot = p_n_leached + labs(subtitle = NULL) + scale_y_continuous(expand = expansion(mult = 0.096)) + theme(plot.margin = margin(1.6, 2, 1.6, 2, "pt")), width = save_width_plots, height = save_height_plots, dpi = save_dpi_plots)
 ```
 
 ::: {.callout-note title="Model checks (click to show/hide)" collapse="true"}
