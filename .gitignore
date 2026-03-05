@@ -17,6 +17,7 @@ desktop.ini
 .quarto/
 _freeze/
 *.html
+!Scripts/Analysis_Report.html
 *.log
 
 # IDE / editors
