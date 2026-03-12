@@ -276,13 +276,20 @@ best_model_summaries <- function(model_fits) {
 plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
                             raw_data, response_labels = NULL,
                             depth_order = NULL, ncol = 2, force_model = NULL,
+                            response_filter = NULL, treatment_filter = NULL,
                             save_dir = NULL, save_prefix = "", save_dpi = 600,
-                            save_width = 5, save_height = 5) {
+                            save_width = 5, save_height = 3) {
   library(ggplot2)
   library(RColorBrewer)
   plots <- list()
 
+  # Common x range and month breaks so Treatment and Treatment × Depth panels align
+  x_range_global     <- range(raw_data[[time]], na.rm = TRUE)
+  month_breaks_global <- seq(floor(x_range_global[1] / 12) * 12, ceiling(x_range_global[2] / 12) * 12, by = 12)
+
   for (resp in names(model_fits$fits)) {
+
+    if (!is.null(response_filter) && resp != response_filter) next
 
     models     <- model_fits$fits[[resp]]
     aicc_sub   <- model_fits$aicc_table[model_fits$aicc_table[[1]] == resp, ]
@@ -375,14 +382,23 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
 
     if (multi_depth) plot_data$depth_group <- factor(plot_data[[depth]], levels = depth_levels)
 
+    # Optional: show only one treatment (plotting only; model unchanged)
+    if (!is.null(treatment_filter) && !is.null(treatment) && multi_depth) {
+      plot_data <- plot_data[plot_data[[treatment]] == treatment_filter, ]
+      pred_df   <- pred_df[startsWith(as.character(pred_df$colour_group), paste0(treatment_filter, " | ")), ]
+      keep      <- names(pal)[startsWith(names(pal), paste0(treatment_filter, " | "))]
+      pal       <- pal[keep]
+      pred_df$colour_group <- factor(pred_df$colour_group, levels = names(pal))
+      plot_data$colour_group <- factor(plot_data$colour_group, levels = names(pal))
+    }
+
     y_label   <- if (!is.null(response_labels) && resp %in% names(response_labels)) response_labels[[resp]] else gsub("_", " ", resp)
     y_label   <- gsub(",", "", y_label)  # remove commas from variable names
     col_label <- if (multi_depth) paste(gsub("_"," ",treatment), "\u00d7", gsub("_"," ",depth)) else if (!is.null(treatment)) gsub("_"," ",treatment) else NULL
     if (!is.null(col_label)) col_label <- tools::toTitleCase(col_label)
 
-    # Month axis: breaks every 12 months
-    x_range      <- range(raw_data[[time]], na.rm = TRUE)
-    month_breaks <- seq(floor(x_range[1] / 12) * 12, ceiling(x_range[2] / 12) * 12, by = 12)
+    # Month axis: use global range and breaks so all panels align
+    month_breaks <- month_breaks_global
 
     # Formula form for subtitle and equation LHS: y, sqrt(y), or y²
     model_form <- switch(best_nm,
@@ -403,6 +419,7 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
     eq_lines  <- character(0)
     for (grp in eq_order) {
       if (!grp %in% names(pal)) next
+      if (!is.null(treatment_filter) && !startsWith(grp, paste0(treatment_filter, " | "))) next
       pg <- pred_df[pred_df$colour_group == grp, ]
       if (nrow(pg) >= 2) {
         pg <- pg[order(pg[[time]]), ]
@@ -410,10 +427,10 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
         y1 <- pg[[resp]][1]; y2 <- pg[[resp]][nrow(pg)]
         slope     <- (y2 - y1) / (x2 - x1)
         intercept <- y1 - slope * x1
-        slope_str     <- format(round(slope, 3), trim = TRUE)
-        intercept_str <- format(round(intercept, 3), trim = TRUE)
+        slope_str     <- format(round(slope, 2), trim = TRUE)
+        intercept_str <- format(round(intercept, 2), trim = TRUE)
         pm <- if (slope >= 0) " + " else " \u2212 "
-        slope_str <- if (slope >= 0) slope_str else format(round(-slope, 3), trim = TRUE)
+        slope_str <- if (slope >= 0) slope_str else format(round(-slope, 2), trim = TRUE)
         eq_lines <- c(eq_lines, paste0(grp, ": ", eq_lhs, intercept_str, pm, slope_str, "\u00b7", sub("months", "Months", time, ignore.case = TRUE)))
       }
     }
@@ -478,8 +495,12 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
         }
       } +
       scale_fill_manual(values = pal, drop = FALSE, guide = "none") +
-      scale_x_continuous(breaks = month_breaks, expand = expansion(mult = c(0.02, 0.06))) +
-      scale_y_continuous(expand = expansion(mult = 0.12)) +
+      scale_x_continuous(limits = x_range_global, breaks = month_breaks, expand = expansion(mult = c(0.02, if (multi_depth) 0.58 else 0.32))) +
+      scale_y_continuous(
+        limits = if (resp == "total_pom_c_mg_ha") c(0, NA) else NULL,
+        expand = expansion(mult = if (resp == "total_pom_c_mg_ha") c(0, 0.12) else 0.12),
+        breaks = if (resp %in% c("total_pom_c_mg_ha", "total_pom_n_kg_ha")) scales::extended_breaks(n = 8) else waiver()
+      ) +
       { if (multi_depth) scale_linetype_manual(values = depth_linetypes, guide = "none") } +
       { if (multi_depth) scale_shape_discrete(guide = "none") } +
       labs(
@@ -492,8 +513,12 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
       theme(plot.title            = element_text(face = "bold", size = 11),
             plot.subtitle         = element_text(size = 8, colour = "grey40", hjust = 0, lineheight = 1,
                                                 margin = margin(b = 10)),
-            legend.position       = "bottom",
-            legend.box.spacing    = unit(10, "pt"),
+            axis.text.x           = element_text(size = 8),
+            legend.position       = c(1, 0.5),
+            legend.justification  = c(1, 0.5),
+            legend.box            = "vertical",
+            legend.box.background = element_rect(fill = "white", colour = "grey85", linewidth = 0.5),
+            legend.margin         = margin(6, 8, 6, 8),
             legend.title.position = "top",
             legend.key.size       = unit(0.5, "cm"),
             legend.text           = element_text(size = 7),
@@ -501,7 +526,6 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
     # Aspect: square if one panel; 0.5 if multi-panel so panel heights match in grid
     n_plots <- length(model_fits$fits)
     p <- p + theme(aspect.ratio = if (n_plots == 1L) 1 else 0.5)
-    if (!multi_depth) p <- p + theme(legend.justification = "left")
     plots[[resp]] <- p
   }
 
@@ -519,15 +543,19 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
     }
   }
 
-  # Save each response plot to disk when save_dir is set (same dimensions as Quarto panels, 600 dpi)
+  # Save each response plot to disk when save_dir is set (no subtitle; reduced top/bottom margin)
   if (!is.null(save_dir)) {
     dir.create(save_dir, recursive = TRUE, showWarnings = FALSE)
     for (resp in names(plots)) {
       fname <- paste0(gsub("[^a-zA-Z0-9._-]", "_", resp), ".png")
       if (nzchar(save_prefix)) fname <- paste0(save_prefix, "_", fname)
+      plot_to_save <- plots[[resp]] +
+        labs(subtitle = NULL) +
+        scale_y_continuous(expand = expansion(mult = 0.096)) +
+        theme(plot.margin = margin(1.6, 2, 1.6, 2, "pt"))
       ggplot2::ggsave(
         filename = file.path(save_dir, fname),
-        plot     = plots[[resp]],
+        plot     = plot_to_save,
         width    = save_width,
         height   = save_height,
         dpi      = save_dpi
