@@ -523,9 +523,9 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
             legend.key.size       = unit(0.5, "cm"),
             legend.text           = element_text(size = 7),
             legend.title          = element_text(size = 8))
-    # Aspect: square if one panel; 0.5 if multi-panel so panel heights match in grid
+    # Aspect: 0.5 (wide panel) for one or many panels — matches single-ggplot analyses (e.g. N leached uses 0.5)
     n_plots <- length(model_fits$fits)
-    p <- p + theme(aspect.ratio = if (n_plots == 1L) 1 else 0.5)
+    p <- p + theme(aspect.ratio = 0.5)
     plots[[resp]] <- p
   }
 

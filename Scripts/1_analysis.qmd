@@ -54,7 +54,7 @@ options(mc.cores = parallel::detectCores())
 #| label: wrangle-df
 
 # Total soil C & N: read, clean names, standardise depth labels and factors
-df <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "Total soil C & N")
+df <- read_excel(here("Analysis/Data/200424_compiled_data_for_paper.xlsx"), sheet = "Total soil C & N")
 orig_names_1 <- names(df)
 df <- df %>% clean_names()
 response_labels_1 <- setNames(orig_names_1, names(df))
@@ -75,7 +75,7 @@ df %>% group_by(year, treatment, depth) %>% tally()
 #| label: wrangle-df2
 
 # POM C & N: read (skip header), clean names, depth labels, factors; ensure "months" for modelling
-df.2 <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "POM C & N", skip = 1)
+df.2 <- read_excel(here("Analysis/Data/200424_compiled_data_for_paper.xlsx"), sheet = "POM C & N", skip = 1)
 orig_names_2 <- names(df.2)
 df.2 <- df.2 %>% clean_names()
 response_labels_2 <- setNames(orig_names_2, names(df.2))
@@ -94,7 +94,7 @@ df.2 %>% group_by(date, treatment, depth) %>% tally()
 #| label: wrangle-df4
 
 # Microbial biomass C & N: read, clean names, depth labels, factors
-df.4 <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "MB C & N")
+df.4 <- read_excel(here("Analysis/Data/200424_compiled_data_for_paper.xlsx"), sheet = "MB C & N")
 orig_names_4 <- names(df.4)
 df.4 <- df.4 %>% clean_names()
 response_labels_4 <- setNames(orig_names_4, names(df.4))
@@ -114,7 +114,7 @@ df.4 %>% group_by(date, treatment, depth) %>% tally()
 #| label: wrangle-df3
 
 # Total cations & pH: read (skip 2 rows), clean names, depth labels, factors
-df.3 <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "Total cations & pH", skip = 2)
+df.3 <- read_excel(here("Analysis/Data/200424_compiled_data_for_paper.xlsx"), sheet = "Total cations & pH", skip = 2)
 orig_names_3 <- names(df.3)
 df.3 <- df.3 %>% clean_names()
 response_labels_3 <- setNames(orig_names_3, names(df.3))
@@ -131,7 +131,7 @@ df.3 %>% group_by(year, treatment, depth) %>% tally()
 #| label: wrangle-df5
 
 # N Leached: read range AK8:AT20 (10 cols: year, N leached × 2, cum N leached × 2, drainage × 2, cum drainage × 2, winter rainfall)
-df.5 <- read_excel(here("Analysis/Data/compiled_data_for_paper.xlsx"), sheet = "N Leached", range = "AK8:AT20")
+df.5 <- read_excel(here("Analysis/Data/200424_compiled_data_for_paper.xlsx"), sheet = "N Leached", range = "AK8:AT20")
 names(df.5) <- c(
   "year", "fallow_n_leached", "pasture_n_leached",
   "cummulative_n_leached_fallow", "cummulative_n_leached_pasture",
@@ -167,9 +167,52 @@ df.5 <- df.5 %>%
 # Labels for plotting (used if this table is combined with other analyses)
 response_labels_5 <- c(
   n_leached_cummulative = "Cumulative N leached (kg N/ha)",
-  cummulative_drainage  = "Cumulative drainage (mm)"
+  cummulative_drainage  = "Cumulative drainage (mm)",
+  plot_n_leached        = "Plot N Leached"
 )
+
+# Plot-level N leached (sheet col AC, header row 8); `months` added after Mineral N wrangling (same time axis as Mineral N)
+df.5.plot <- read_excel(here("Analysis/Data/200424_compiled_data_for_paper.xlsx"), sheet = "N Leached", range = "A8:AC500") %>%
+  clean_names() %>%
+  mutate(treatment = factor(treat, levels = c("Fallow", "Pasture"))) %>%
+  filter(!is.na(plot_n_leached))
+
 df.5
+```
+
+```{r}
+#| label: wrangle-df6
+
+# Mineral N (skip 5 header rows). Years 2001–2007 lack Date: use 1 July of Year for the time axis; otherwise parse Excel serial dates.
+df.6 <- read_excel(here("Analysis/Data/200424_compiled_data_for_paper.xlsx"), sheet = "Mineral N", skip = 5)
+orig_names_6 <- names(df.6)
+df.6 <- df.6 %>% clean_names()
+response_labels_6 <- setNames(orig_names_6, names(df.6))
+# Response: sheet col T (Tot MinN/ha) → tot_min_n_ha
+response_labels_6["tot_min_n_ha"] <- "Total mineral N (kg N/ha)"
+
+df.6 <- df.6 %>%
+  mutate(
+    treatment = factor(trt_name, levels = c("Fallow", "Pasture")),
+    depth = factor(depth_cm, levels = c("0-10", "10-20", "20-40", "40-60")),
+    plot = as.factor(plot),
+    rep = as.factor(rep)
+  )
+date_p <- suppressWarnings(as.Date(as.numeric(df.6$date), origin = "1899-12-30"))
+date_imp <- date_p
+idx <- is.na(date_imp)
+date_imp[idx] <- as.Date(paste0(df.6$year[idx], "-07-01"))
+df.6$months <- as.numeric(difftime(date_imp, min(date_imp, na.rm = TRUE), units = "days")) / (365.25 / 12)
+
+# Match Plot N leached rows to the same `months` scale as Mineral N (mean months per calendar year)
+months_by_year <- df.6 %>%
+  group_by(year) %>%
+  summarise(months = mean(months, na.rm = TRUE), .groups = "drop")
+df.5.plot <- df.5.plot %>%
+  left_join(months_by_year, by = "year") %>%
+  filter(!is.na(months))
+
+df.6 %>% group_by(year, treatment, depth) %>% tally()
 ```
 :::
 
@@ -486,24 +529,6 @@ knitr::kable(analysis_4$aicc_table)
 ```
 :::
 
-**Export AICc tables to Excel**
-
-```{r}
-#| label: export-aicc-tables
-#| echo: false
-
-dir.create(tables_dir, recursive = TRUE, showWarnings = FALSE)
-writexl::write_xlsx(
-  list(
-    Analysis_1_Total_soil_C_N   = analysis_1$aicc_table,
-    Analysis_2_POM_C_N          = analysis_2$aicc_table,
-    Analysis_3_Microbial_biomass = analysis_3$aicc_table,
-    Analysis_4_pH_cations       = analysis_4$aicc_table
-  ),
-  file.path(tables_dir, "aicc_tables.xlsx")
-)
-```
-
 ::: {.callout-note title="Model checks (click to show/hide)" collapse="true"}
 ```{r}
 #| label: analysis-4-checks
@@ -529,7 +554,9 @@ best_model_summaries(analysis_4)
 
 ### N Leached
 
-Linear regression: cumulative N leached ~ cumulative drainage × treatment (`lm`).
+Linear regression (`lm`): response ~ cumulative drainage × treatment. **Year-level** totals use the block from column AK. **Plot N Leached** (column AC, header row 8) uses the same **Months** time axis as the Mineral N analysis (via mean `months` per year from the Mineral N sheet). That sub-model uses **`lm(log(plot_n_leached) ~ …)`** (Gaussian errors on the log scale; rows with `plot_n_leached == 0` excluded). Fitted values and intervals are shown on the **original scale** (back-transformed).
+
+#### Cumulative N leached (year totals)
 
 ```{r}
 #| label: analysis-5-fit
@@ -642,6 +669,227 @@ summary(model_n_leached)
 ```
 :::
 :::
+
+#### Plot N Leached
+
+```{r}
+#| label: analysis-5-plot-n-fit
+#| results: false
+
+# Log-scale linear model (lognormal on response scale); zeros omitted (log undefined)
+model_plot_n_leached <- lm(
+  log(plot_n_leached) ~ months * treatment,
+  data = df.5.plot,
+  subset = plot_n_leached > 0
+)
+```
+
+**Plots**
+
+```{r}
+#| label: analysis-5-plot-n-plots
+#| fig-width: 5
+#| fig-height: 5
+#| out-width: 50%
+#| layout-ncol: 2
+
+# Same x limits and breaks as Mineral N (`plot_model_fits` uses full `months` range of `df.6`)
+x_rng <- range(df.6$months, na.rm = TRUE)
+month_breaks <- seq(floor(x_rng[1] / 12) * 12, ceiling(x_rng[2] / 12) * 12, by = 12)
+
+pred_plot_n <- expand_grid(
+  months = seq(x_rng[1], x_rng[2], length.out = 100),
+  treatment = factor(c("Fallow", "Pasture"), levels = c("Fallow", "Pasture"))
+)
+pr <- predict(model_plot_n_leached, newdata = pred_plot_n, se.fit = TRUE)
+pred_plot_n$fit_log <- pr$fit
+pred_plot_n$se_log  <- pr$se.fit
+pred_plot_n <- pred_plot_n %>% filter(complete.cases(fit_log, se_log))
+# Back-transform to original scale for plotting (median-type fit; symmetric CI on log scale)
+pred_plot_n$fit  <- exp(pred_plot_n$fit_log)
+pred_plot_n$ymin <- exp(pred_plot_n$fit_log - 1.96 * pred_plot_n$se_log)
+pred_plot_n$ymax <- exp(pred_plot_n$fit_log + 1.96 * pred_plot_n$se_log)
+
+co <- coef(model_plot_n_leached)
+r2 <- format(round(summary(model_plot_n_leached)$r.squared, 2), trim = TRUE)
+int_fallow <- co["(Intercept)"]
+slope_fallow <- co["months"]
+int_pasture  <- co["(Intercept)"] + if (is.na(co["treatmentPasture"])) 0 else co["treatmentPasture"]
+slope_pasture <- co["months"] +
+  if (is.na(co["months:treatmentPasture"])) 0 else co["months:treatmentPasture"]
+eq_fallow  <- paste0(
+  "Fallow: log(y) = ", format(round(int_fallow, 2), trim = TRUE),
+  if (slope_fallow >= 0) " + " else " \u2212 ",
+  format(round(abs(slope_fallow), 2), trim = TRUE), "\u00b7Months"
+)
+eq_pasture <- paste0(
+  "Pasture: log(y) = ", format(round(int_pasture, 2), trim = TRUE),
+  if (slope_pasture >= 0) " + " else " \u2212 ",
+  format(round(abs(slope_pasture), 2), trim = TRUE), "\u00b7Months"
+)
+subtitle_plot_n <- paste(
+  "Log-scale linear model", paste0("R\u00b2 = ", r2, " (on log scale)"),
+  eq_fallow, eq_pasture,
+  sep = "\n"
+)
+
+p_plot_n <- ggplot(
+  df.5.plot %>% filter(plot_n_leached > 0),
+  aes(x = months, y = plot_n_leached, colour = treatment)
+) +
+  geom_ribbon(
+    data = pred_plot_n,
+    aes(x = months, ymin = ymin, ymax = ymax, fill = treatment),
+    alpha = 0.15, colour = NA, inherit.aes = FALSE
+  ) +
+  geom_line(
+    data = pred_plot_n,
+    aes(x = months, y = fit, colour = treatment),
+    linewidth = 1.2, inherit.aes = FALSE
+  ) +
+  geom_point(alpha = 0.8, size = 2.5) +
+  scale_colour_manual(values = c(Fallow = "#8B4513", Pasture = "#228B22"), name = "Treatment") +
+  scale_fill_manual(values = c(Fallow = "#8B4513", Pasture = "#228B22"), guide = "none") +
+  scale_x_continuous(limits = x_rng, breaks = month_breaks, expand = expansion(mult = c(0.02, 0.32))) +
+  scale_y_continuous(expand = expansion(mult = 0.12)) +
+  labs(
+    x = "Months",
+    y = response_labels_5[["plot_n_leached"]],
+    subtitle = subtitle_plot_n
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    aspect.ratio = 0.5,
+    legend.position = c(1, 0.5),
+    legend.justification = c(1, 0.5),
+    legend.box = "vertical",
+    legend.box.background = element_rect(fill = "white", colour = "grey85", linewidth = 0.5),
+    legend.margin = margin(6, 8, 6, 8),
+    plot.subtitle = element_text(size = 8, colour = "grey40", hjust = 0, lineheight = 1.1, margin = margin(b = 10))
+  )
+print(p_plot_n)
+ggsave(
+  file.path(plots_dir, "plot_n_leached_vs_months.png"),
+  plot = p_plot_n + labs(subtitle = NULL) + scale_y_continuous(expand = expansion(mult = 0.096)) + theme(plot.margin = margin(1.6, 2, 1.6, 2, "pt")),
+  width = save_width_plots, height = save_height_plots, dpi = save_dpi_plots
+)
+```
+
+- A lognormal-style specification (`lm` on `log(response)`) is used **for this Plot N Leached model only**; other analyses in this report use models on the original response scale.
+
+::: {.callout-note title="Model checks (Plot N Leached; click to show/hide)" collapse="true"}
+```{r}
+#| label: analysis-5-plot-n-checks
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: 100%
+
+print(plot(performance::check_model(model_plot_n_leached, panel = TRUE)))
+```
+:::
+
+::: {.callout-note title="Model summary (Plot N Leached; click to show/hide)" collapse="true"}
+::: {.model-summary}
+```{r}
+#| label: analysis-5-plot-n-summaries
+#| class-output: model-summary
+
+summary(model_plot_n_leached)
+```
+:::
+:::
+
+### Mineral N
+
+```{r}
+#| label: analysis-6-fit
+#| results: false
+
+analysis_6 <- fit_models(
+  df.6,
+  response_vars = c("tot_min_n_ha"),
+  time = "months",
+  treatment = "treatment",
+  depth = "depth"
+)
+```
+
+**Plots**
+
+```{r}
+#| label: analysis-6-plots
+#| fig-width: 10
+#| fig-height: 5
+#| out-width: 100%
+
+plot_model_fits(
+  model_fits      = analysis_6,
+  time            = "months",
+  treatment       = "treatment",
+  depth           = "depth",
+  depth_order     = c("0-10", "10-20", "20-40", "40-60"),
+  raw_data        = df.6,
+  response_labels = response_labels_6,
+  ncol            = 2,
+  save_dir        = plots_dir,
+  save_dpi        = save_dpi_plots,
+  save_width      = save_width_plots,
+  save_height     = save_height_plots
+)
+```
+
+**AICc table**
+
+::: {.aicc-table}
+```{r}
+#| label: analysis-6-aicc
+
+knitr::kable(analysis_6$aicc_table)
+```
+:::
+
+::: {.callout-note title="Model checks (click to show/hide)" collapse="true"}
+```{r}
+#| label: analysis-6-checks
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: 100%
+
+check_model_performance(analysis_6)
+```
+:::
+
+::: {.callout-note title="Best model summaries (click to show/hide)" collapse="true"}
+::: {.model-summary}
+```{r}
+#| label: analysis-6-summaries
+#| class-output: model-summary
+
+best_model_summaries(analysis_6)
+```
+:::
+:::
+
+**Export AICc tables to Excel**
+
+```{r}
+#| label: export-aicc-tables
+#| echo: false
+
+dir.create(tables_dir, recursive = TRUE, showWarnings = FALSE)
+writexl::write_xlsx(
+  list(
+    Analysis_1_Total_soil_C_N     = analysis_1$aicc_table,
+    Analysis_2_POM_C_N            = analysis_2$aicc_table,
+    Analysis_3_Microbial_biomass  = analysis_3$aicc_table,
+    Analysis_4_pH_cations         = analysis_4$aicc_table,
+    Analysis_6_Mineral_N          = analysis_6$aicc_table
+  ),
+  file.path(tables_dir, "aicc_tables.xlsx")
+)
+```
 
 # References
 
