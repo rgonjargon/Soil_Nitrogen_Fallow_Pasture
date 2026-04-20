@@ -10,6 +10,7 @@ Data/
 
 # OS
 .DS_Store
+._*
 Thumbs.db
 desktop.ini
 
