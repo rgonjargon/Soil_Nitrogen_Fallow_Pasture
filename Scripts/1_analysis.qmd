@@ -36,7 +36,7 @@ options(repos = c(CRAN = "https://cloud.r-project.org"))
 # Install and load packages
 packages <- c(
   "tidyverse", "readxl", "writexl", "here", "janitor",
-  "lme4", "MuMIn", "performance",
+  "lme4", "MuMIn", "performance", "emmeans", "multcomp",
   "RColorBrewer", "gridExtra", "colorspace"
 )
 installed <- rownames(installed.packages())
@@ -890,6 +890,303 @@ writexl::write_xlsx(
   file.path(tables_dir, "aicc_tables.xlsx")
 )
 ```
+
+### Table 3: Drainage, autumn mineral N and NO₃ leached
+
+Year-level summary (2001–2013) from `table_3.csv`: winter rainfall, drainage, autumn mineral N and plot NO₃ leached by treatment (Pasture vs Fallow).
+
+::: {.callout-note title="Wrangling & Summary" collapse="true"}
+```{r}
+#| label: wrangle-table-3
+
+df.7 <- read_csv(here("Analysis/Data/table_3.csv"), show_col_types = FALSE) %>%
+  mutate(
+    year = as.integer(year),
+    treatment = factor(treatment, levels = c("Fallow", "Pasture"))
+  )
+
+response_labels_7 <- c(
+  drainage_mm            = "Drainage (mm)",
+  autumn_mineral_n_kg_ha = "Autumn mineral N (kg N/ha)",
+  no3_leached_kg_ha      = "NO₃ leached (kg N/ha)"
+)
+
+df.7 %>%
+  pivot_longer(
+    cols = c(drainage_mm, autumn_mineral_n_kg_ha, no3_leached_kg_ha),
+    names_to = "response",
+    values_to = "value"
+  ) %>%
+  mutate(
+    response = recode(response, !!!response_labels_7)
+  ) %>%
+  group_by(treatment, response) %>%
+  summarise(
+    n    = sum(!is.na(value)),
+    mean = mean(value, na.rm = TRUE),
+    sd   = sd(value, na.rm = TRUE),
+    min  = min(value, na.rm = TRUE),
+    median = median(value, na.rm = TRUE),
+    max  = max(value, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(across(c(mean, sd, min, median, max), ~ round(.x, 2))) %>%
+  knitr::kable(col.names = c("Treatment", "Response", "n", "Mean", "SD", "Min", "Median", "Max"))
+```
+:::
+
+**Plots**
+
+```{r}
+#| label: table-3-plots
+#| fig-width: 12
+#| fig-height: 4
+#| out-width: 100%
+
+df.7_long <- df.7 %>%
+  pivot_longer(
+    cols = c(drainage_mm, autumn_mineral_n_kg_ha, no3_leached_kg_ha),
+    names_to = "response",
+    values_to = "value"
+  ) %>%
+  filter(!is.na(value)) %>%
+  mutate(
+    response = factor(
+      response,
+      levels = names(response_labels_7),
+      labels = unname(response_labels_7)
+    )
+  )
+
+p_table_3 <- ggplot(df.7_long, aes(x = treatment, y = value, fill = treatment)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA, width = 0.6) +
+  geom_jitter(aes(colour = treatment), width = 0.12, alpha = 0.8, size = 2.5, show.legend = FALSE) +
+  facet_wrap(~ response, scales = "free_y", ncol = 3) +
+  scale_fill_manual(values = c(Fallow = "#8B4513", Pasture = "#228B22"), guide = "none") +
+  scale_colour_manual(values = c(Fallow = "#8B4513", Pasture = "#228B22"), guide = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.12))) +
+  labs(x = "Treatment", y = NULL) +
+  theme_classic(base_size = 11) +
+  theme(
+    strip.background = element_rect(fill = "grey95", colour = "grey85"),
+    strip.text = element_text(size = 10),
+    aspect.ratio = 0.6,
+    panel.spacing = unit(1.2, "lines")
+  )
+
+print(p_table_3)
+ggsave(
+  file.path(plots_dir, "table_3_boxplots.png"),
+  plot = p_table_3 + theme(plot.margin = margin(1.6, 2, 1.6, 2, "pt")),
+  width = save_width_plots * 2.4,
+  height = save_height_plots,
+  dpi = save_dpi_plots
+)
+```
+
+**Analysis**
+
+Generalised linear model (`glm`, Gamma family, log link): NO₃ leached ~ treatment + drainage + autumn mineral N. A Gamma distribution with log link suits positive, right-skewed leaching data. A small constant (1 × 10⁻⁶ kg N/ha) is added to NO₃ leached so zero values are retained in the analysis.
+
+```{r}
+#| label: table-3-fit
+#| results: false
+
+no3_leached_offset <- 1e-6
+
+df.7_fit <- df.7 %>%
+  filter(complete.cases(no3_leached_kg_ha, drainage_mm, autumn_mineral_n_kg_ha)) %>%
+  mutate(no3_leached_kg_ha = no3_leached_kg_ha + no3_leached_offset)
+
+model_table_3 <- glm(
+  no3_leached_kg_ha ~ treatment + drainage_mm + autumn_mineral_n_kg_ha,
+  family = Gamma(link = "log"),
+  data = df.7_fit
+)
+
+model_table_3_no_treatment <- glm(
+  no3_leached_kg_ha ~ drainage_mm + autumn_mineral_n_kg_ha,
+  family = Gamma(link = "log"),
+  data = df.7_fit
+)
+```
+
+::: {.callout-note title="Model checks (click to show/hide)" collapse="true"}
+```{r}
+#| label: table-3-checks
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: 100%
+
+print(plot(performance::check_model(model_table_3, panel = TRUE)))
+```
+:::
+
+::: {.callout-note title="Model summary and statistical significance" collapse="true"}
+::: {.model-summary}
+```{r}
+#| label: table-3-summaries
+#| class-output: model-summary
+
+format_term_label_7 <- function(term) {
+  term %>%
+    stringr::str_replace_all("drainage_mm", "Drainage (mm)") %>%
+    stringr::str_replace_all("autumn_mineral_n_kg_ha", "Autumn mineral N (kg N/ha)") %>%
+    stringr::str_replace_all("treatment", "Treatment") %>%
+    stringr::str_replace_all(":", " × ")
+}
+
+table_3_var_explained <- function(model) {
+  full_pseudo_r2 <- 1 - model$deviance / model$null.deviance
+  terms <- attr(terms(model), "term.labels")
+  var_explained <- purrr::map_dfr(terms, function(t) {
+    reduced <- update(model, stats::as.formula(paste(". ~ . -", t)))
+    d_full  <- deviance(model)
+    d_red   <- deviance(reduced)
+    lrt     <- anova(reduced, model, test = "Chisq")
+    tibble(
+      term       = format_term_label_7(t),
+      partial_r2 = (d_red - d_full) / d_red,
+      p_value    = lrt$`Pr(>Chi)`[2]
+    )
+  })
+  list(full_pseudo_r2 = full_pseudo_r2, var_explained = var_explained)
+}
+
+table_3_var_explained_kable <- function(model, caption_suffix = "") {
+  res <- table_3_var_explained(model)
+  knitr::kable(
+    res$var_explained %>%
+      mutate(
+        partial_r2 = round(partial_r2 * 100, 1),
+        p_value    = format.pval(p_value, digits = 3, eps = 0.001)
+      ) %>%
+      rename(
+        Term = term,
+        `Partial R² (%)` = partial_r2,
+        `P value` = p_value
+      ),
+    caption = paste0(
+      "Total model pseudo R² (deviance explained) = ",
+      format(round(res$full_pseudo_r2 * 100, 1), trim = TRUE),
+      "%. Partial R² = proportion of deviance explained by each term after accounting for the other terms.",
+      caption_suffix
+    )
+  )
+}
+
+cat("NO₃ leached ~ treatment + drainage + autumn mineral N\n\n")
+summary(model_table_3)
+cat("\n\nVariance explained by term (deviance-based partial R²)\n\n")
+print(table_3_var_explained_kable(model_table_3))
+
+cat("\n\nNO₃ leached ~ drainage + autumn mineral N\n\n")
+summary(model_table_3_no_treatment)
+cat("\n\nVariance explained by term (deviance-based partial R²)\n\n")
+print(table_3_var_explained_kable(model_table_3_no_treatment))
+```
+:::
+:::
+
+Univariate Gamma GLMs comparing Pasture and Fallow for each response (year-level observations). A 1 × 10⁻⁶ offset is applied to drainage and NO₃ leached where zeros occur.
+
+#### Drainage ~ Treatment
+
+```{r}
+#| label: table-3-drainage-fit
+#| results: false
+
+model_drainage_treatment <- glm(
+  I(drainage_mm + no3_leached_offset) ~ treatment,
+  family = Gamma(link = "log"),
+  data = df.7 %>% filter(!is.na(drainage_mm))
+)
+```
+
+::: {.callout-note title="Model checks — Drainage ~ Treatment (click to show/hide)" collapse="true"}
+```{r}
+#| label: table-3-drainage-checks
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: 100%
+
+print(plot(performance::check_model(model_drainage_treatment, panel = TRUE)))
+```
+:::
+
+#### Autumn mineral N ~ Treatment
+
+```{r}
+#| label: table-3-minn-fit
+#| results: false
+
+model_minn_treatment <- glm(
+  autumn_mineral_n_kg_ha ~ treatment,
+  family = Gamma(link = "log"),
+  data = df.7 %>% filter(!is.na(autumn_mineral_n_kg_ha))
+)
+```
+
+::: {.callout-note title="Model checks — Autumn mineral N ~ Treatment (click to show/hide)" collapse="true"}
+```{r}
+#| label: table-3-minn-checks
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: 100%
+
+print(plot(performance::check_model(model_minn_treatment, panel = TRUE)))
+```
+:::
+
+#### NO₃ leached ~ Treatment
+
+```{r}
+#| label: table-3-no3-treatment-fit
+#| results: false
+
+model_no3_treatment <- glm(
+  I(no3_leached_kg_ha + no3_leached_offset) ~ treatment,
+  family = Gamma(link = "log"),
+  data = df.7 %>% filter(!is.na(no3_leached_kg_ha))
+)
+```
+
+::: {.callout-note title="Model checks — NO₃ leached ~ Treatment (click to show/hide)" collapse="true"}
+```{r}
+#| label: table-3-no3-treatment-checks
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+#| out-width: 100%
+
+print(plot(performance::check_model(model_no3_treatment, panel = TRUE)))
+```
+:::
+
+::: {.callout-note title="Treatment comparisons: LSD" collapse="true"}
+::: {.model-summary}
+```{r}
+#| label: table-3-treatment-summaries
+#| class-output: model-summary
+
+table_3_treatment_lsd <- function(model, response_label) {
+  emm     <- emmeans::emmeans(model, ~ treatment, type = "response")
+  lsd_cld <- multcomp::cld(emm, adjust = "none", Letters = letters)
+  cat("\n\n", response_label, "\n\n", sep = "")
+  print(summary(model))
+  cat("\nCompact letter display — LSD\n\n")
+  print(knitr::kable(as.data.frame(lsd_cld), digits = 2))
+}
+
+table_3_treatment_lsd(model_drainage_treatment, "Drainage (mm) ~ Treatment")
+table_3_treatment_lsd(model_minn_treatment, "Autumn mineral N (kg N/ha) ~ Treatment")
+table_3_treatment_lsd(model_no3_treatment, "NO₃ leached (kg N/ha) ~ Treatment")
+```
+:::
+:::
 
 # References
 
