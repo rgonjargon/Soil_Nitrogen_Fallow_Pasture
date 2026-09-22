@@ -283,6 +283,20 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
   library(RColorBrewer)
   plots <- list()
 
+  # Display only: millimetre depth codes stay on the model factors
+  depth_mm_to_cm <- c(
+    "0-75"    = "0-7.5",
+    "75-150"  = "7.5-15",
+    "150-250" = "15-25"
+  )
+  display_trt_depth <- function(grp) {
+    vapply(strsplit(as.character(grp), " | ", fixed = TRUE), function(p) {
+      dep <- p[length(p)]
+      if (dep %in% names(depth_mm_to_cm)) p[length(p)] <- unname(depth_mm_to_cm[[dep]])
+      paste(p, collapse = " | ")
+    }, character(1L), USE.NAMES = FALSE)
+  }
+
   # Common x range and month breaks so Treatment and Treatment × Depth panels align
   x_range_global     <- range(raw_data[[time]], na.rm = TRUE)
   month_breaks_global <- seq(floor(x_range_global[1] / 12) * 12, ceiling(x_range_global[2] / 12) * 12, by = 12)
@@ -431,7 +445,7 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
         intercept_str <- format(round(intercept, 2), trim = TRUE)
         pm <- if (slope >= 0) " + " else " \u2212 "
         slope_str <- if (slope >= 0) slope_str else format(round(-slope, 2), trim = TRUE)
-        eq_lines <- c(eq_lines, paste0(grp, ": ", eq_lhs, intercept_str, pm, slope_str, "\u00b7", sub("months", "Months", time, ignore.case = TRUE)))
+        eq_lines <- c(eq_lines, paste0(display_trt_depth(grp), ": ", eq_lhs, intercept_str, pm, slope_str, "\u00b7", sub("months", "Months", time, ignore.case = TRUE)))
       }
     }
     # Subtitle: Best model name (Linear / Square Root / Quadratic) and formula form, then R², then formulas
@@ -479,6 +493,7 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
           )
           scale_colour_manual(
             values = pal, name = col_label, drop = FALSE,
+            labels = display_trt_depth(names(pal)),
             guide  = guide_legend(
               keywidth     = unit(1, "cm"),
               override.aes = list(linetype = unname(combo_ltys), linewidth = 1)
@@ -499,7 +514,13 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
       scale_y_continuous(
         limits = if (resp == "total_pom_c_mg_ha") c(0, NA) else NULL,
         expand = expansion(mult = if (resp == "total_pom_c_mg_ha") c(0, 0.12) else 0.12),
-        breaks = if (resp %in% c("total_pom_c_mg_ha", "total_pom_n_kg_ha")) scales::extended_breaks(n = 8) else waiver()
+        breaks = if (resp == "total_pom_n_kg_ha") {
+          c(500, 750, 1000, 1250)
+        } else if (resp == "total_pom_c_mg_ha") {
+          scales::extended_breaks(n = 8)
+        } else {
+          waiver()
+        }
       ) +
       { if (multi_depth) scale_linetype_manual(values = depth_linetypes, guide = "none") } +
       { if (multi_depth) scale_shape_discrete(guide = "none") } +
@@ -551,7 +572,10 @@ plot_model_fits <- function(model_fits, time, treatment = NULL, depth = NULL,
       if (nzchar(save_prefix)) fname <- paste0(save_prefix, "_", fname)
       plot_to_save <- plots[[resp]] +
         labs(subtitle = NULL) +
-        scale_y_continuous(expand = expansion(mult = 0.096)) +
+        scale_y_continuous(
+          expand = expansion(mult = 0.096),
+          breaks = if (resp == "total_pom_n_kg_ha") c(500, 750, 1000, 1250) else waiver()
+        ) +
         theme(plot.margin = margin(1.6, 2, 1.6, 2, "pt"))
       ggplot2::ggsave(
         filename = file.path(save_dir, fname),
